@@ -685,6 +685,178 @@ def test_terminal_short_circuits_via_http(tmp_path):
         _stop_handler(first_proc)
 
 
+def _await_log(tmp_path: Path, needle: str, timeout_s: float = 5.0) -> str:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        log = _daemon_log(tmp_path)
+        if needle in log:
+            return log
+        time.sleep(0.05)
+    return _daemon_log(tmp_path)
+
+
+def _await_handler_in_health(
+    base: str, name: str, *, present: bool, timeout_s: float = 5.0,
+) -> dict:
+    """Poll /health until ``name`` is present (or absent). Returns last body."""
+    deadline = time.monotonic() + timeout_s
+    body: dict = {}
+    while time.monotonic() < deadline:
+        try:
+            _, body = _get(f"{base}/health")
+        except (urllib.error.URLError, OSError):
+            time.sleep(0.05)
+            continue
+        names = {h["name"] for h in body.get("handlers", [])}
+        if (name in names) is present:
+            return body
+        time.sleep(0.05)
+    return body
+
+
+def test_config_edit_hot_reloads_handler_chain(tmp_path):
+    """Edit config.toml mid-flight: new handler appears in /health and serves
+    the chain without restarting the daemon."""
+    port = _free_port()
+    h_proc, h_url, _ = _spawn_handler(tmp_path, "late_added", response=_DENY_RESPONSE)
+    try:
+        # Start with NO handlers configured.
+        user_dir = _make_user_config(tmp_path, f"""
+            [daemon]
+            port = {port}
+        """)
+        proc = _spawn_router(tmp_path, user_config_dir=user_dir, port=port)
+        try:
+            base = f"http://127.0.0.1:{port}"
+            _, body = _get(f"{base}/health")
+            assert body["handlers"] == []
+
+            # Hot-add the handler via config edit.
+            _write(user_dir / "config.toml", dedent(f"""
+                [daemon]
+                port = {port}
+
+                [[handler]]
+                name = "late_added"
+                url = "{h_url}"
+                events = ["preToolUse"]
+            """))
+            body = _await_handler_in_health(base, "late_added", present=True)
+            assert any(h["name"] == "late_added" for h in body["handlers"]), body
+
+            # New handler now serves the chain.
+            status, body = _post(f"{base}/hooks/preToolUse", {})
+            assert status == 200
+            assert body["hookSpecificOutput"]["permissionDecision"] == "deny"
+        finally:
+            _shutdown(proc)
+        log = _daemon_log(tmp_path)
+        assert "Traceback" not in log, log
+        assert "config reload: 1 handler(s) loaded" in log, log
+    finally:
+        _stop_handler(h_proc)
+
+
+def test_config_broken_toml_keeps_prior_chain(tmp_path):
+    """Save broken TOML mid-edit: log records error, prior chain keeps serving.
+    Fix the TOML: next save reloads cleanly."""
+    port = _free_port()
+    h_proc, h_url, _ = _spawn_handler(tmp_path, "stable_h", response=_DENY_RESPONSE)
+    try:
+        user_dir = _make_user_config(tmp_path, f"""
+            [daemon]
+            port = {port}
+
+            [[handler]]
+            name = "stable_h"
+            url = "{h_url}"
+            events = ["preToolUse"]
+        """)
+        proc = _spawn_router(tmp_path, user_config_dir=user_dir, port=port)
+        try:
+            base = f"http://127.0.0.1:{port}"
+            # Sanity: chain works.
+            _, body = _post(f"{base}/hooks/preToolUse", {})
+            assert body["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+            # Save broken TOML.
+            (user_dir / "config.toml").write_text("this is = not valid = toml [[[\n")
+            _await_log(tmp_path, "config reload failed")
+
+            # Prior chain still serves.
+            _, body = _post(f"{base}/hooks/preToolUse", {})
+            assert body["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+            # Fix the TOML — recovery.
+            _write(user_dir / "config.toml", dedent(f"""
+                [daemon]
+                port = {port}
+
+                [[handler]]
+                name = "stable_h"
+                url = "{h_url}"
+                events = ["preToolUse"]
+            """))
+            _await_log(tmp_path, "config reload: 1 handler(s) loaded")
+            _, body = _post(f"{base}/hooks/preToolUse", {})
+            assert body["hookSpecificOutput"]["permissionDecision"] == "deny"
+        finally:
+            _shutdown(proc)
+    finally:
+        _stop_handler(h_proc)
+
+
+def test_bounded_worker_pool_caps_concurrent_handler_calls(tmp_path):
+    """With max_workers=2 and 5 inbound requests against a hanging handler,
+    only 2 requests reach the handler — the other 3 sit in the router's
+    executor queue. Asserts the pool actually bounds in-flight work."""
+    import threading
+    port = _free_port()
+    record = tmp_path / "hits"
+    h_proc, h_url, _ = _spawn_handler(
+        tmp_path, "hang_h", mode="hang", record_file=record,
+    )
+    try:
+        user_dir = _make_user_config(tmp_path, f"""
+            [daemon]
+            port = {port}
+            max_workers = 2
+            request_timeout_s = 30.0
+        """ + f"""
+            [[handler]]
+            name = "hang_h"
+            url = "{h_url}"
+            events = ["preToolUse"]
+        """)
+        proc = _spawn_router(tmp_path, user_config_dir=user_dir, port=port)
+        try:
+            url = f"http://127.0.0.1:{port}/hooks/preToolUse"
+            errors: list[Exception] = []
+
+            def fire():
+                try:
+                    _post(url, {}, timeout=2.0)
+                except Exception as e:
+                    errors.append(e)
+
+            threads = [threading.Thread(target=fire, daemon=True) for _ in range(5)]
+            for t in threads:
+                t.start()
+            # All 5 will time out (handler hangs); we don't care, we just want
+            # to observe how many actually reached the handler before timeouts.
+            time.sleep(1.0)
+            hits = int(record.read_text().strip()) if record.exists() else 0
+            assert hits == 2, (
+                f"max_workers=2 should cap concurrent handler calls; saw {hits}"
+            )
+            for t in threads:
+                t.join(timeout=5.0)
+        finally:
+            _shutdown(proc)
+    finally:
+        _stop_handler(h_proc)
+
+
 def test_second_router_exits_when_first_running(tmp_path):
     port1 = _free_port()
     user_dir = _make_user_config(tmp_path, f"""

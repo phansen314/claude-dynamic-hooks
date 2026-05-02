@@ -86,6 +86,7 @@ in registration order:
 port = 8765
 request_timeout_s = 5.0
 wire_max_bytes = 1048576
+max_workers = 16
 
 [[handler]]
 name = "read_once"
@@ -109,6 +110,25 @@ every handler call. `terminal` is per-handler.
 | `port` | 1 – 65535 | 8765 |
 | `request_timeout_s` | 0.1 – 60.0 | 5.0 |
 | `wire_max_bytes` | 1024 – 67108864 | 1048576 (1 MiB) |
+| `max_workers` | 0 – 1024 | 16 (set `0` for unbounded) |
+
+`max_workers` bounds the inbound request thread pool. Excess concurrent
+requests queue inside the executor instead of spawning new threads.
+
+### Hot config reload
+
+The daemon watches `~/.config/cdh/config.toml` (via `watchdog`) and
+atomically swaps the live handler list, hook defaults, and per-call wire
+timeout / byte cap whenever the file changes. No restart needed for
+adding/removing handlers or editing event lists.
+
+`[daemon].port` is bound at startup and is not hot-reloadable; changing
+it requires `cdh stop && cdh start`. Likewise the inbound `MAX_CONTENT_LENGTH`
+(set from `wire_max_bytes` at startup) is fixed for the daemon's lifetime;
+hot-reloaded `wire_max_bytes` only affects the router→handler hop.
+
+If a save produces invalid TOML, the parse error is logged and the prior
+chain keeps serving — fix the file and the next save reloads cleanly.
 
 ## Failure modes
 
@@ -119,7 +139,7 @@ every handler call. `terminal` is per-handler.
 | Handler 5xx / non-2xx | Step treated as null; chain continues. |
 | Handler returns missing/malformed `envelope` field | Step treated as null + logged. |
 | Router itself down | Claude's HTTP hook treats connection-refused as non-blocking (fail-open default). |
-| Router under high concurrent load | Werkzeug `threaded=True` is unbounded; misbehaving Claude Code can exhaust memory. Single-user dev tool by design — front with `gunicorn`/`waitress` if you need a bounded pool. |
+| Router under high concurrent load | Inbound requests are served from a fixed-size thread pool (`[daemon].max_workers`, default 16). Excess requests queue inside the executor; set `max_workers = 0` to revert to the old unbounded werkzeug behavior. |
 
 ## Versioning
 

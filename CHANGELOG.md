@@ -4,6 +4,32 @@ All notable changes to this project will be documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] — 2026-05-02
+
+### Added
+
+- **Hot config reload.** Daemon now watches `~/.config/cdh/config.toml`
+  (via `watchdog`) and atomically swaps the live handler list, hook
+  defaults, and per-call wire timeout / byte cap on every save. No
+  restart needed for adding/removing handlers or editing event lists.
+  Invalid TOML is logged and the prior chain keeps serving until the next
+  valid save. `[daemon].port` and the inbound `MAX_CONTENT_LENGTH` are
+  still pinned at startup.
+- **Bounded inbound thread pool.** New `[daemon].max_workers` field
+  (range 0–1024, default 16). Excess concurrent requests queue inside
+  the pool instead of spawning unbounded werkzeug threads. Set
+  `max_workers = 0` to revert to the prior unbounded behavior.
+- **`cdh test <handler> <event>`.** POST a synthetic event payload
+  directly to one handler, bypassing the chain. Accepts inline
+  `--payload`, `--payload-file`, or `--payload -` (stdin).
+- **`cdh logs [-n N] [-f]`.** Tail or follow the daemon log file
+  without needing to know its path.
+
+### Changed
+
+- Added `watchdog>=4.0` to runtime dependencies (required for the
+  config-file watcher; ~zero transitive deps on Linux/macOS).
+
 ## [1.0.1] — 2026-05-02
 
 ### Changed

@@ -58,6 +58,32 @@ def test_out_of_range_port_raises(tmp_path: Path, monkeypatch):
         config_mod.load()
 
 
+def test_max_workers_default(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("CDH_CONFIG_DIR", str(tmp_path))
+    cfg = config_mod.load()
+    assert cfg.daemon.max_workers == 16
+
+
+def test_max_workers_zero_means_unbounded(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("CDH_CONFIG_DIR", str(tmp_path))
+    _write(tmp_path / "config.toml", dedent("""
+        [daemon]
+        max_workers = 0
+    """))
+    cfg = config_mod.load()
+    assert cfg.daemon.max_workers == 0
+
+
+def test_max_workers_out_of_range_raises(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("CDH_CONFIG_DIR", str(tmp_path))
+    _write(tmp_path / "config.toml", dedent("""
+        [daemon]
+        max_workers = -1
+    """))
+    with pytest.raises(ValueError, match=r"\[daemon\]\.max_workers"):
+        config_mod.load()
+
+
 def test_out_of_range_wire_max_bytes_raises(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("CDH_CONFIG_DIR", str(tmp_path))
     _write(tmp_path / "config.toml", dedent("""

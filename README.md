@@ -51,7 +51,9 @@ events = ["preToolUse"]
 
 The `events` array declares which events this handler answers for. Add `terminal = true` on the handler to short-circuit the chain when this handler returns a non-null envelope.
 
-`[daemon]` accepts `port` (1–65535, default 8765), `request_timeout_s` (0.1–60.0, default 5.0), and `wire_max_bytes` (1024–67108864, default 1048576). Out-of-range values fail loudly on `cdh start`.
+`[daemon]` accepts `port` (1–65535, default 8765), `request_timeout_s` (0.1–60.0, default 5.0), `wire_max_bytes` (1024–67108864, default 1048576), and `max_workers` (0–1024, default 16; set `0` for an unbounded pool). Out-of-range values fail loudly on `cdh start`.
+
+Edits to `config.toml` are applied live — the daemon watches the file and atomically swaps the handler chain, defaults, and wire timeout/cap on every save. Only `port` and the inbound `MAX_CONTENT_LENGTH` are pinned at startup.
 
 **4. Start the router**
 
@@ -87,6 +89,8 @@ cdh start              # start router daemon
 cdh stop               # stop router daemon
 cdh status             # show router pid
 cdh list-handlers      # list configured handlers + live health
+cdh test <name> <ev>   # POST a synthetic event directly to one handler (bypasses chain)
+cdh logs [-f] [-n N]   # show daemon log; -f to stream
 ```
 
 ## Writing a handler

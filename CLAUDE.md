@@ -11,13 +11,13 @@ Authoritative wire spec: `docs/openapi.yaml`. Protocol overview: `docs/CDHP.md`.
 - **Handlers don't import this package.** They're standalone HTTP/1.1 servers in any language.
 - **Wire is opaque.** Router↔handler hop wraps Claude payload as `{"payload": "<json-str>"}` and unwraps `{"envelope": "<json-str>"|null}`. Don't add Claude-schema typing on this hop — the whole point is decoupling from Claude's evolving envelope schema.
 - **No SDK.** No Python helper classes for writing handlers — they would couple handlers to this package's lifecycle.
-- **Minimal runtime deps.** Currently: Flask (router HTTP server) and requests (router→handler client). Justify additions in PR description; reach for stdlib first.
+- **Minimal runtime deps.** Currently: Flask (router HTTP server), requests (router→handler client), and watchdog (config hot reload — atomic-rename-correct via inotify/kqueue). Justify additions in PR description; reach for stdlib first.
 
 ## Layout
 
 | Path | Purpose |
 |---|---|
-| `src/claude_dynamic_hooks/_server/` | daemon (Flask app + werkzeug WSGI server), http_client, router chain, process lock |
+| `src/claude_dynamic_hooks/_server/` | daemon (Flask app + werkzeug WSGI server, bounded thread pool), http_client, router chain, process lock, config watcher |
 | `src/claude_dynamic_hooks/_cli/` | `cdh` entry points |
 | `src/claude_dynamic_hooks/{config,events,paths}.py` | TOML schema, EventType enum, filesystem paths |
 | `examples/handlers/read_once/` | sole canonical example handler |

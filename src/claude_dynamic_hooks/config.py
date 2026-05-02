@@ -34,6 +34,7 @@ def _pre_tool_use_decision(decision: str, reason: str) -> dict:
 _DEFAULT_PORT = 8765
 _DEFAULT_REQUEST_TIMEOUT_S = 5.0
 _DEFAULT_WIRE_MAX_BYTES = 1 * 1024 * 1024  # 1 MiB
+_DEFAULT_MAX_WORKERS = 16
 
 # ---- Bounds applied when user provides their own values ----
 _PORT_MIN = 1
@@ -42,6 +43,8 @@ _REQUEST_TIMEOUT_S_FLOOR = 0.1
 _REQUEST_TIMEOUT_S_CEILING = 60.0
 _WIRE_MAX_BYTES_FLOOR = 1 * 1024            # 1 KiB
 _WIRE_MAX_BYTES_CEILING = 64 * 1024 * 1024  # 64 MiB
+_MAX_WORKERS_FLOOR = 0                      # 0 = unbounded (back-compat escape hatch)
+_MAX_WORKERS_CEILING = 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +52,7 @@ class DaemonConfig:
     port: int = _DEFAULT_PORT                       # router HTTP listen port
     request_timeout_s: float = _DEFAULT_REQUEST_TIMEOUT_S  # per-request wall-clock cap
     wire_max_bytes: int = _DEFAULT_WIRE_MAX_BYTES   # request/response cap
+    max_workers: int = _DEFAULT_MAX_WORKERS         # thread pool size; 0 = unbounded
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +113,7 @@ def _build_daemon(raw: dict) -> DaemonConfig:
     port = int(raw.get("port", _DEFAULT_PORT))
     timeout = float(raw.get("request_timeout_s", _DEFAULT_REQUEST_TIMEOUT_S))
     max_bytes = int(raw.get("wire_max_bytes", _DEFAULT_WIRE_MAX_BYTES))
+    max_workers = int(raw.get("max_workers", _DEFAULT_MAX_WORKERS))
     return DaemonConfig(
         port=_bounded("[daemon].port", port, _PORT_MIN, _PORT_MAX),
         request_timeout_s=_bounded(
@@ -118,6 +123,10 @@ def _build_daemon(raw: dict) -> DaemonConfig:
         wire_max_bytes=_bounded(
             "[daemon].wire_max_bytes", max_bytes,
             _WIRE_MAX_BYTES_FLOOR, _WIRE_MAX_BYTES_CEILING,
+        ),
+        max_workers=_bounded(
+            "[daemon].max_workers", max_workers,
+            _MAX_WORKERS_FLOOR, _MAX_WORKERS_CEILING,
         ),
     )
 
