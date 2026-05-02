@@ -72,21 +72,25 @@ def test_out_of_range_wire_max_bytes_raises(tmp_path: Path, monkeypatch):
 # hook_defaults
 # ---------------------------------------------------------------------------
 
-def test_pretooluse_default_is_ask_when_unset(tmp_path: Path, monkeypatch):
+def test_all_events_default_to_passthrough_when_unset(tmp_path: Path, monkeypatch):
+    """No built-in defaults — every event passes through unless user opts in."""
     monkeypatch.setenv("CDH_CONFIG_DIR", str(tmp_path))
+    cfg = config_mod.load()
+    for ev in EventType:
+        assert cfg.defaults.get(ev) is None
+
+
+def test_pretooluse_user_opt_in_to_ask(tmp_path: Path, monkeypatch):
+    """User can re-enable the previous fail-safe ask behavior explicitly."""
+    monkeypatch.setenv("CDH_CONFIG_DIR", str(tmp_path))
+    _write(tmp_path / "config.toml", dedent("""
+        [hook_defaults]
+        preToolUse = "ask"
+    """))
     cfg = config_mod.load()
     pre = cfg.defaults.get(EventType.PRE_TOOL_USE)
     assert pre is not None
     assert pre["hookSpecificOutput"]["permissionDecision"] == "ask"
-
-
-def test_other_events_default_is_passthrough(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("CDH_CONFIG_DIR", str(tmp_path))
-    cfg = config_mod.load()
-    for ev in EventType:
-        if ev is EventType.PRE_TOOL_USE:
-            continue
-        assert cfg.defaults.get(ev) is None
 
 
 def test_hook_defaults_rejects_invalid_keyword(tmp_path: Path, monkeypatch):

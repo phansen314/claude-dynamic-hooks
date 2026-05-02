@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] — 2026-05-02
+
+### Changed
+
+- **Handler config schema flattened.** Replace `[handler.events.<event>]`
+  per-event tables with a flat `events = [...]` array on each `[[handler]]`
+  block, plus an optional top-level `terminal = true|false`. Per-event
+  `timeout_s` and `max_bytes` overrides are removed — wire timeout and byte
+  cap come from `[daemon]` globals only. Existing configs using the table
+  form must be rewritten.
+- **Built-in `preToolUse` default flipped from `ask` → passthrough.** When
+  every handler abstains and no user-configured default exists, router now
+  returns `{}` instead of an `ask` envelope. Claude Code's own permission
+  flow handles the request. Users who relied on cdh as a fail-safe ask gate
+  can opt in explicitly:
+  ```toml
+  [hook_defaults]
+  preToolUse = "ask"
+  ```
+  Motivation: the old default forced a confirmation prompt for every
+  tool call (Bash, Edit, Write, …) when only a Read-only handler was
+  configured — surprising and hostile to the common case.
+
 ## [1.0.0] — 2026-05-02
 
 Initial stable release.
@@ -51,3 +74,4 @@ The following invariants are stable as of 1.0 and won't be reverted (see
 - Bind on TCP loopback by convention.
 
 [1.0.0]: https://github.com/phansen314/claude-dynamic-hooks/releases/tag/v1.0.0
+[1.0.1]: https://github.com/phansen314/claude-dynamic-hooks/releases/tag/v1.0.1

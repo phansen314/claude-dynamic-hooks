@@ -251,7 +251,9 @@ _DENY_RESPONSE = {"hookSpecificOutput": {
 # Tests
 # ---------------------------------------------------------------------------
 
-def test_no_handlers_pretooluse_returns_ask_default(tmp_path):
+def test_no_handlers_pretooluse_returns_empty(tmp_path):
+    """No handlers + no user-configured default → router returns `{}` so
+    Claude Code applies its normal permission flow."""
     port = _free_port()
     user_dir = _make_user_config(tmp_path, f"""
         [daemon]
@@ -261,10 +263,29 @@ def test_no_handlers_pretooluse_returns_ask_default(tmp_path):
     try:
         status, body = _post(f"http://127.0.0.1:{port}/hooks/preToolUse", {})
         assert status == 200
-        assert body["hookSpecificOutput"]["permissionDecision"] == "ask"
+        assert body == {}
     finally:
         stderr = _shutdown(proc)
     assert b"Traceback" not in stderr, stderr.decode()
+
+
+def test_user_can_opt_into_ask_default(tmp_path):
+    """Built-in default is empty; user opts into `ask` via `[hook_defaults]`."""
+    port = _free_port()
+    user_dir = _make_user_config(tmp_path, f"""
+        [daemon]
+        port = {port}
+
+        [hook_defaults]
+        preToolUse = "ask"
+    """)
+    proc = _spawn_router(tmp_path, user_config_dir=user_dir, port=port)
+    try:
+        status, body = _post(f"http://127.0.0.1:{port}/hooks/preToolUse", {})
+        assert status == 200
+        assert body["hookSpecificOutput"]["permissionDecision"] == "ask"
+    finally:
+        _shutdown(proc)
 
 
 def test_no_handlers_post_tool_use_returns_empty(tmp_path):
@@ -306,7 +327,8 @@ def test_handler_returns_envelope(tmp_path):
         _stop_handler(h_proc)
 
 
-def test_handler_returning_none_falls_to_ask_default(tmp_path):
+def test_handler_returning_none_falls_to_empty(tmp_path):
+    """Handler abstains, no user default → router returns `{}`."""
     port = _free_port()
     h_proc, h_url, _ = _spawn_handler(tmp_path, "noop_h")
     try:
@@ -323,7 +345,7 @@ def test_handler_returning_none_falls_to_ask_default(tmp_path):
         try:
             status, body = _post(f"http://127.0.0.1:{port}/hooks/preToolUse", {})
             assert status == 200
-            assert body["hookSpecificOutput"]["permissionDecision"] == "ask"
+            assert body == {}
         finally:
             _shutdown(proc)
     finally:
@@ -392,7 +414,7 @@ def test_handler_500_coerces_to_default(tmp_path):
         try:
             status, body = _post(f"http://127.0.0.1:{port}/hooks/preToolUse", {})
             assert status == 200
-            assert body["hookSpecificOutput"]["permissionDecision"] == "ask"
+            assert body == {}
         finally:
             _shutdown(proc)
     finally:
@@ -401,7 +423,7 @@ def test_handler_500_coerces_to_default(tmp_path):
 
 def test_router_starts_with_no_handler_running(tmp_path):
     """Configure a handler URL with nothing running there. Router still starts;
-    chain step fails (ECONNREFUSED) and falls through to default."""
+    chain step fails (ECONNREFUSED) and falls through to empty default."""
     port = _free_port()
     dead_port = _free_port()
     user_dir = _make_user_config(tmp_path, f"""
@@ -417,7 +439,7 @@ def test_router_starts_with_no_handler_running(tmp_path):
     try:
         status, body = _post(f"http://127.0.0.1:{port}/hooks/preToolUse", {})
         assert status == 200
-        assert body["hookSpecificOutput"]["permissionDecision"] == "ask"
+        assert body == {}
     finally:
         _shutdown(proc)
 
@@ -439,9 +461,9 @@ def test_handler_started_after_router_works_immediately(tmp_path):
     """)
     proc = _spawn_router(tmp_path, user_config_dir=user_dir, port=port)
     try:
-        # Pre-handler request: ECONNREFUSED → default fires.
+        # Pre-handler request: ECONNREFUSED → empty default fires.
         _, body = _post(f"http://127.0.0.1:{port}/hooks/preToolUse", {})
-        assert body["hookSpecificOutput"]["permissionDecision"] == "ask"
+        assert body == {}
 
         # Now start the handler.
         handler_dir = tmp_path / "handlers" / "late_h"
@@ -497,7 +519,7 @@ def _daemon_log(tmp_path: Path) -> str:
 
 def test_handler_hang_times_out_chain_continues(tmp_path):
     """Handler accepts TCP but never responds. Router timeout fires; chain
-    coerces step to null; default ask envelope returned to caller."""
+    coerces step to null; empty envelope returned to caller."""
     port = _free_port()
     h_proc, h_url, _ = _spawn_handler(tmp_path, "hang_h", mode="hang")
     try:
@@ -519,7 +541,7 @@ def test_handler_hang_times_out_chain_continues(tmp_path):
             )
             elapsed = time.monotonic() - t0
             assert status == 200
-            assert body["hookSpecificOutput"]["permissionDecision"] == "ask"
+            assert body == {}
             assert elapsed < 3.0, f"router didn't honor 0.5s timeout; took {elapsed:.2f}s"
         finally:
             _shutdown(proc)
@@ -532,7 +554,7 @@ def test_handler_hang_times_out_chain_continues(tmp_path):
 
 
 def test_handler_text_plain_response_coerces_to_null(tmp_path):
-    """Handler returns 200 + text/plain body. Chain treats as null; default fires."""
+    """Handler returns 200 + text/plain body. Chain treats as null; empty default."""
     port = _free_port()
     h_proc, h_url, _ = _spawn_handler(tmp_path, "text_h", mode="text_plain")
     try:
@@ -549,7 +571,7 @@ def test_handler_text_plain_response_coerces_to_null(tmp_path):
         try:
             status, body = _post(f"http://127.0.0.1:{port}/hooks/preToolUse", {})
             assert status == 200
-            assert body["hookSpecificOutput"]["permissionDecision"] == "ask"
+            assert body == {}
         finally:
             _shutdown(proc)
     finally:
@@ -558,7 +580,7 @@ def test_handler_text_plain_response_coerces_to_null(tmp_path):
 
 def test_handler_missing_envelope_key_logged_as_malformed(tmp_path):
     """Handler returns 200 + JSON object missing `envelope` key. Chain treats
-    as malformed envelope; logs and falls through to default."""
+    as malformed envelope; logs and falls through to empty default."""
     port = _free_port()
     h_proc, h_url, _ = _spawn_handler(tmp_path, "missing_h", mode="missing_envelope")
     try:
@@ -575,7 +597,7 @@ def test_handler_missing_envelope_key_logged_as_malformed(tmp_path):
         try:
             status, body = _post(f"http://127.0.0.1:{port}/hooks/preToolUse", {})
             assert status == 200
-            assert body["hookSpecificOutput"]["permissionDecision"] == "ask"
+            assert body == {}
         finally:
             _shutdown(proc)
         log = _daemon_log(tmp_path)

@@ -93,8 +93,10 @@ url = "http://127.0.0.1:9001"
 events = ["preToolUse"]
 terminal = false   # optional; default false. Short-circuit chain on non-null reply.
 
-[hook_defaults.preToolUse]
-# Optional fallback envelope when every handler abstains.
+[hook_defaults]
+# Optional fallback when every handler abstains. Default: passthrough
+# (router returns `{}`, Claude Code applies its own permission flow).
+# preToolUse = "ask"   # opt into a fail-safe ask gate
 ```
 
 `request_timeout_s` and `wire_max_bytes` are router-global — they apply to

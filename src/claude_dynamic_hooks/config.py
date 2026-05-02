@@ -191,6 +191,4 @@ def _compile_default(event: EventType, kw) -> dict | None:
     )
 
 
-_BUILTIN_DEFAULTS: dict[EventType, dict | None] = {
-    EventType.PRE_TOOL_USE: _pre_tool_use_decision("ask", "cdh: default (ask)"),
-}
+_BUILTIN_DEFAULTS: dict[EventType, dict | None] = {}
