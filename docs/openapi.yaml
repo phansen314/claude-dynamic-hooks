@@ -1,0 +1,244 @@
+openapi: 3.1.0
+info:
+  title: CDHP Handler
+  version: 1.0.0
+  description: |
+    Claude Dynamic Hook Protocol — handler contract.
+
+    A CDHP handler is a standalone HTTP/1.1 server. It implements
+    `POST /hooks/<event>` for each event it answers for and `GET /health`
+    for liveness. Events are declared statically in the router's config
+    (`[handler.events.<event>]`); the router does not probe handlers to
+    discover events. `GET /health` is used by `cdh list-handlers` to
+    report alive/down status.
+
+    Claude payloads are passed as opaque JSON strings in `payload`, and handler
+    responses are passed as opaque JSON strings in `envelope` (or `null` for
+    "no opinion"). This keeps the wire decoupled from Claude's evolving message
+    schema — handlers parse `payload` themselves with a JSON library and emit
+    Claude envelopes the same way.
+
+    The router (`cdh-daemon`) is documented separately; this spec covers only
+    what a handler must implement.
+
+servers:
+  - url: http://{host}:{port}
+    description: Handler bound on TCP loopback (typical convention)
+    variables:
+      host:
+        default: 127.0.0.1
+      port:
+        default: "9001"
+
+paths:
+  /health:
+    get:
+      summary: Liveness + capability probe
+      description: |
+        Required endpoint. The router does not require `/health` to discover
+        events — declaration is static under `[handler.events.<event>]` in
+        router config — but `cdh list-handlers` calls `/health` to report
+        alive/down status, and operators rely on it for ad-hoc curl debugging.
+      responses:
+        "200":
+          description: Handler is alive; advertises declared events.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              examples:
+                read_once:
+                  value:
+                    name: read_once
+                    protocol_version: "1.0"
+                    events: [preToolUse]
+                    uptime_s: 42
+        "5XX":
+          description: |
+            Handler is broken. `cdh list-handlers` reports the handler as
+            `down (<code>)`; the router treats any non-2xx as unreachable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /hooks/{event}:
+    post:
+      summary: Dispatch a hook event
+      description: |
+        Router POSTs the Claude hook payload here. Body is a JSON object with
+        a single field `payload` whose value is the Claude payload re-serialized
+        as a JSON string. Handler returns 200 with `{"envelope": "<json-str>"}`
+        to inject a Claude envelope, or `{"envelope": null}` to abstain.
+
+        The handler MUST return 404 if `event` is not in its declared event
+        list (from `/health`).
+      parameters:
+        - $ref: "#/components/parameters/Event"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HookRequest"
+            examples:
+              pre_tool_use_read:
+                summary: PreToolUse for a Read call
+                value:
+                  payload: '{"session_id":"abc123","tool_name":"Read","tool_input":{"file_path":"/etc/hosts"}}'
+      responses:
+        "200":
+          description: Handler responded. Envelope present (string) or null.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HookResponse"
+              examples:
+                envelope:
+                  summary: Handler returns an allow envelope
+                  value:
+                    envelope: '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"already in context"}}'
+                null_response:
+                  summary: Handler abstains
+                  value:
+                    envelope: null
+        "400":
+          description: |
+            Body was not a JSON object, or `payload` field was missing or not
+            a string.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: |
+            Path is `/hooks/<event>` but `event` is not in the handler's
+            declared list (from `/health`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          description: |
+            Request body exceeded the handler's declared cap. Optional —
+            handlers MAY skip this if they accept any size; the router has its
+            own cap as well.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "5XX":
+          description: |
+            Handler crashed or otherwise failed to produce an envelope.
+            Router logs the status code (see `client.py`) and continues the
+            chain; the failed handler's contribution is treated as null.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+components:
+  parameters:
+    Event:
+      name: event
+      in: path
+      required: true
+      description: |
+        Claude hook event name (camelCase). Full catalog per
+        code.claude.com/docs/en/hooks. Handlers declare the subset they
+        answer for via `GET /health`.
+      schema:
+        type: string
+        enum:
+          # Session lifecycle
+          - sessionStart
+          - setup
+          - sessionEnd
+          # Per-turn
+          - userPromptSubmit
+          - userPromptExpansion
+          - stop
+          - stopFailure
+          # Tool execution
+          - preToolUse
+          - permissionRequest
+          - permissionDenied
+          - postToolUse
+          - postToolUseFailure
+          - postToolBatch
+          # Subagents
+          - subagentStart
+          - subagentStop
+          # Tasks
+          - taskCreated
+          - taskCompleted
+          # Agent team
+          - teammateIdle
+          # Context & configuration
+          - instructionsLoaded
+          - configChange
+          - fileChanged
+          - cwdChanged
+          # Compaction
+          - preCompact
+          - postCompact
+          # Worktree
+          - worktreeCreate
+          - worktreeRemove
+          # User interaction
+          - notification
+          - elicitation
+          - elicitationResult
+
+  schemas:
+    HealthResponse:
+      type: object
+      required: [name, protocol_version, events, uptime_s]
+      properties:
+        name:
+          type: string
+          description: Handler identifier; matches the router config `[[handler]] name`.
+        protocol_version:
+          type: string
+          const: "1.0"
+          description: CDHP wire version this handler implements.
+        events:
+          type: array
+          items:
+            type: string
+          description: Claude hook events this handler answers for.
+        uptime_s:
+          type: integer
+          minimum: 0
+          description: Seconds since handler started (monotonic).
+
+    HookRequest:
+      type: object
+      required: [payload]
+      additionalProperties: false
+      properties:
+        payload:
+          type: string
+          description: |
+            Claude hook payload, serialized as a JSON string. Handler decodes
+            with its own JSON library. Treated as opaque by the router.
+
+    HookResponse:
+      type: object
+      required: [envelope]
+      additionalProperties: false
+      properties:
+        envelope:
+          type: [string, "null"]
+          description: |
+            Claude hook envelope, serialized as a JSON string, OR null to
+            abstain ("no opinion"). The router parses non-null strings and
+            forwards the resulting object to Claude.
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Short human-readable error message.
