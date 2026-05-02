@@ -57,8 +57,7 @@ Add to `~/.config/cdh/config.toml`:
 [[handler]]
 name = "read_once"
 url = "http://127.0.0.1:9001"
-
-[handler.events.preToolUse]
+events = ["preToolUse"]
 ```
 
 Then `cdh start` (or `cdh stop && cdh start` if already running).

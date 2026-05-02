@@ -293,8 +293,7 @@ def test_handler_returns_envelope(tmp_path):
             [[handler]]
             name = "deny_h"
             url = "{h_url}"
-
-            [handler.events.preToolUse]
+            events = ["preToolUse"]
         """)
         proc = _spawn_router(tmp_path, user_config_dir=user_dir, port=port)
         try:
@@ -318,8 +317,7 @@ def test_handler_returning_none_falls_to_ask_default(tmp_path):
             [[handler]]
             name = "noop_h"
             url = "{h_url}"
-
-            [handler.events.preToolUse]
+            events = ["preToolUse"]
         """)
         proc = _spawn_router(tmp_path, user_config_dir=user_dir, port=port)
         try:
@@ -362,8 +360,7 @@ def test_router_health_lists_handlers(tmp_path):
             [[handler]]
             name = "noop_h"
             url = "{h_url}"
-
-            [handler.events.preToolUse]
+            events = ["preToolUse"]
         """)
         proc = _spawn_router(tmp_path, user_config_dir=user_dir, port=port)
         try:
@@ -389,8 +386,7 @@ def test_handler_500_coerces_to_default(tmp_path):
             [[handler]]
             name = "boom_h"
             url = "{h_url}"
-
-            [handler.events.preToolUse]
+            events = ["preToolUse"]
         """)
         proc = _spawn_router(tmp_path, user_config_dir=user_dir, port=port)
         try:
@@ -415,8 +411,7 @@ def test_router_starts_with_no_handler_running(tmp_path):
         [[handler]]
         name = "ghost"
         url = "http://127.0.0.1:{dead_port}"
-
-        [handler.events.preToolUse]
+        events = ["preToolUse"]
     """)
     proc = _spawn_router(tmp_path, user_config_dir=user_dir, port=port)
     try:
@@ -440,8 +435,7 @@ def test_handler_started_after_router_works_immediately(tmp_path):
         [[handler]]
         name = "late_h"
         url = "{h_url}"
-
-        [handler.events.preToolUse]
+        events = ["preToolUse"]
     """)
     proc = _spawn_router(tmp_path, user_config_dir=user_dir, port=port)
     try:
@@ -510,13 +504,12 @@ def test_handler_hang_times_out_chain_continues(tmp_path):
         user_dir = _make_user_config(tmp_path, f"""
             [daemon]
             port = {port}
+            request_timeout_s = 0.5
 
             [[handler]]
             name = "hang_h"
             url = "{h_url}"
-
-            [handler.events.preToolUse]
-            timeout_s = 0.5
+            events = ["preToolUse"]
         """)
         proc = _spawn_router(tmp_path, user_config_dir=user_dir, port=port)
         try:
@@ -550,8 +543,7 @@ def test_handler_text_plain_response_coerces_to_null(tmp_path):
             [[handler]]
             name = "text_h"
             url = "{h_url}"
-
-            [handler.events.preToolUse]
+            events = ["preToolUse"]
         """)
         proc = _spawn_router(tmp_path, user_config_dir=user_dir, port=port)
         try:
@@ -577,8 +569,7 @@ def test_handler_missing_envelope_key_logged_as_malformed(tmp_path):
             [[handler]]
             name = "missing_h"
             url = "{h_url}"
-
-            [handler.events.preToolUse]
+            events = ["preToolUse"]
         """)
         proc = _spawn_router(tmp_path, user_config_dir=user_dir, port=port)
         try:
@@ -609,14 +600,12 @@ def test_chain_recovers_after_malformed_handler(tmp_path):
             [[handler]]
             name = "bad_h"
             url = "{bad_url}"
-
-            [handler.events.preToolUse]
+            events = ["preToolUse"]
 
             [[handler]]
             name = "good_h"
             url = "{good_url}"
-
-            [handler.events.preToolUse]
+            events = ["preToolUse"]
         """)
         proc = _spawn_router(tmp_path, user_config_dir=user_dir, port=port)
         try:
@@ -650,15 +639,13 @@ def test_terminal_short_circuits_via_http(tmp_path):
             [[handler]]
             name = "first_h"
             url = "{first_url}"
-
-            [handler.events.preToolUse]
+            events = ["preToolUse"]
             terminal = true
 
             [[handler]]
             name = "second_h"
             url = "{second_url}"
-
-            [handler.events.preToolUse]
+            events = ["preToolUse"]
         """)
         proc = _spawn_router(tmp_path, user_config_dir=user_dir, port=port)
         try:

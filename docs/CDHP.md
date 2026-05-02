@@ -50,9 +50,7 @@ in the handler itself. The router only POSTs declared events:
 [[handler]]
 name = "read_once"
 url = "http://127.0.0.1:9001"
-
-[handler.events.preToolUse]
-# (empty section is fine; declares preToolUse with chain defaults)
+events = ["preToolUse"]
 ```
 
 The router does not probe handlers. If a handler is configured for an event
@@ -92,15 +90,15 @@ wire_max_bytes = 1048576
 [[handler]]
 name = "read_once"
 url = "http://127.0.0.1:9001"
-
-[handler.events.preToolUse]
-terminal = false
-timeout_s = 2.0
-max_bytes = 524288
+events = ["preToolUse"]
+terminal = false   # optional; default false. Short-circuit chain on non-null reply.
 
 [hook_defaults.preToolUse]
 # Optional fallback envelope when every handler abstains.
 ```
+
+`request_timeout_s` and `wire_max_bytes` are router-global — they apply to
+every handler call. `terminal` is per-handler.
 
 `[daemon]` value bounds (out-of-range raises `ValueError` on `cdh start`):
 
@@ -129,9 +127,8 @@ major (`"2.0"`).
 ## Authoring a handler in another language
 
 Implement `POST /hooks/<event>` per `openapi.yaml`. Bind on `127.0.0.1:<port>`.
-Register in router config with `[[handler]] name = "..." url = "..."` plus
-one `[handler.events.<event>]` section per event you handle. Smoke-test with
-`curl` against the spec.
+Register in router config with `[[handler]] name = "..." url = "..." events = [...]`.
+Smoke-test with `curl` against the spec.
 
 A Python reference (Flask) lives at
 `examples/handlers/read_once/read_once.py`.

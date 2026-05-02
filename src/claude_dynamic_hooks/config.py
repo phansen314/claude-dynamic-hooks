@@ -2,10 +2,11 @@
 
 Single file at `~/.config/cdh/config.toml` (overridable via `CDH_CONFIG_DIR`).
 Contains `[daemon]`, `[hook_defaults]`, and `[[handler]]` entries. Each
-`[[handler]]` declares `name`, `url`, and one `[handler.events.<event>]`
-section per event the handler answers for. Per-event chain overrides
-(terminal, timeout_s, max_bytes) live under those sections. The router
-does not probe handlers to discover events — declaration is static.
+`[[handler]]` declares `name`, `url`, an `events` array of event names,
+and an optional `terminal` bool (short-circuit the chain on a non-null
+response). Wire timeout and byte cap come from `[daemon]` globals
+(`request_timeout_s`, `wire_max_bytes`). The router does not probe
+handlers to discover events — declaration is static.
 """
 from __future__ import annotations
 
@@ -51,19 +52,12 @@ class DaemonConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class ChainOverride:
-    """Per-handler-per-event chain policy override."""
-    terminal: bool = False
-    timeout_s: float | None = None    # None → daemon.request_timeout_s
-    max_bytes: int | None = None      # None → daemon.wire_max_bytes
-
-
-@dataclass(frozen=True, slots=True)
 class HandlerEntry:
     """One `[[handler]]` block in the router config."""
     name: str
     url: str
-    events: dict[EventType, ChainOverride] = field(default_factory=dict)
+    events: frozenset[EventType] = field(default_factory=frozenset)
+    terminal: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,46 +140,30 @@ def _extract_handlers(raw: dict):
             raise ValueError(
                 f"[[handler]][{i}] 'url' must be an http(s) URL; got {url!r}"
             )
-        events_raw = entry.get("events", {}) or {}
-        if not isinstance(events_raw, dict):
-            raise ValueError(f"[[handler]][{i}] 'events' must be a table")
-        events: dict[EventType, ChainOverride] = {}
-        for event_name, override_raw in events_raw.items():
+        events_raw = entry.get("events", []) or []
+        if not isinstance(events_raw, list):
+            raise ValueError(
+                f"[[handler]][{i}] 'events' must be an array of event names"
+            )
+        events: set[EventType] = set()
+        for event_name in events_raw:
+            if not isinstance(event_name, str):
+                raise ValueError(
+                    f"[[handler]][{i}] 'events' entries must be strings; "
+                    f"got {event_name!r}"
+                )
             try:
-                event = EventType(event_name)
+                events.add(EventType(event_name))
             except ValueError as e:
                 raise ValueError(
                     f"[[handler]][{i}] unknown event {event_name!r}"
                 ) from e
-            if not isinstance(override_raw, dict):
-                raise ValueError(
-                    f"[[handler]][{i}] events.{event_name} must be a table"
-                )
-            timeout_raw = override_raw.get("timeout_s")
-            max_bytes_raw = override_raw.get("max_bytes")
-            timeout_s: float | None = None
-            if timeout_raw is not None:
-                timeout_s = _bounded(
-                    f"[[handler]][{i}].events.{event_name}.timeout_s",
-                    float(timeout_raw),
-                    _REQUEST_TIMEOUT_S_FLOOR, _REQUEST_TIMEOUT_S_CEILING,
-                )
-            max_bytes: int | None = None
-            if max_bytes_raw is not None:
-                max_bytes = _bounded(
-                    f"[[handler]][{i}].events.{event_name}.max_bytes",
-                    int(max_bytes_raw),
-                    _WIRE_MAX_BYTES_FLOOR, _WIRE_MAX_BYTES_CEILING,
-                )
-            events[event] = ChainOverride(
-                terminal=bool(override_raw.get("terminal", False)),
-                timeout_s=timeout_s,
-                max_bytes=max_bytes,
-            )
+        terminal = bool(entry.get("terminal", False))
         yield HandlerEntry(
             name=name,
             url=url.rstrip("/"),
-            events=events,
+            events=frozenset(events),
+            terminal=terminal,
         )
 
 

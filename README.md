@@ -46,11 +46,10 @@ port = 8765
 [[handler]]
 name = "read_once"
 url = "http://127.0.0.1:9001"
-
-[handler.events.preToolUse]
+events = ["preToolUse"]
 ```
 
-The `[handler.events.<event>]` section declares which events this handler answers for. Empty section is fine; add `terminal`, `timeout_s`, or `max_bytes` to override chain defaults per-event.
+The `events` array declares which events this handler answers for. Add `terminal = true` on the handler to short-circuit the chain when this handler returns a non-null envelope.
 
 `[daemon]` accepts `port` (1–65535, default 8765), `request_timeout_s` (0.1–60.0, default 5.0), and `wire_max_bytes` (1024–67108864, default 1048576). Out-of-range values fail loudly on `cdh start`.
 
@@ -102,7 +101,7 @@ A handler is a standalone HTTP/1.1 server. Pick a language, bind on `127.0.0.1:<
 | `GET /health` | required; return `{"name", "protocol_version": "1.0", "events": [...], "uptime_s"}`. Used by `cdh list-handlers`. |
 | `SIGTERM` | drain, close, exit 0 |
 
-You declare which events the handler answers for in the **router config** (`[handler.events.<event>]`), not in the handler itself. The router only POSTs declared events.
+You declare which events the handler answers for in the **router config** (`events = [...]` on the `[[handler]]` block), not in the handler itself. The router only POSTs declared events.
 
 `payload` and `envelope` are JSON strings — your handler decodes/encodes them with its own JSON library. The wire is intentionally opaque so Claude's envelope schema can evolve without touching CDHP.
 
@@ -110,20 +109,19 @@ By convention, handlers read `CDH_BIND_ADDR=127.0.0.1:<port>` from the environme
 
 See `examples/handlers/read_once/read_once.py` for a Flask-based Python reference (~190 LOC). Smoke-test your handler with `curl http://localhost:<port>/hooks/preToolUse -d '{"payload":"{}"}'` against the spec.
 
-### Per-handler chain overrides
+### Per-handler `terminal`
 
-Defaults: `terminal=false`, `timeout_s=daemon.request_timeout_s`, `max_bytes=daemon.wire_max_bytes`. Override per event:
+`terminal = false` by default. Set `terminal = true` on the handler to short-circuit the chain whenever this handler returns a non-null envelope:
 
 ```toml
 [[handler]]
 name = "bash_guard"
 url = "http://127.0.0.1:9002"
-
-[handler.events.preToolUse]
-terminal = true             # short-circuit chain on non-null
-timeout_s = 2.0
-max_bytes = 1048576
+events = ["preToolUse"]
+terminal = true
 ```
+
+Wire timeout and byte cap come from `[daemon].request_timeout_s` / `[daemon].wire_max_bytes` — they apply to every handler call.
 
 ## Chain semantics
 

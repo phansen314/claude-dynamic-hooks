@@ -7,7 +7,7 @@ Authoritative wire spec: `docs/openapi.yaml`. Protocol overview: `docs/CDHP.md`.
 ## Architecture invariants
 
 - **Router does not spawn handlers.** Operators run handlers (manual, systemd, container, …). Router only routes.
-- **Router does not probe handlers.** Events are declared statically per handler in `~/.config/cdh/config.toml` under `[handler.events.<event>]`. Handler liveness is detected per-request (ECONNREFUSED is fast on loopback). `cdh list-handlers` does an on-demand `/health` probe just for UX.
+- **Router does not probe handlers.** Events are declared statically per handler in `~/.config/cdh/config.toml` via `events = [...]` on the `[[handler]]` block. Handler liveness is detected per-request (ECONNREFUSED is fast on loopback). `cdh list-handlers` does an on-demand `/health` probe just for UX.
 - **Handlers don't import this package.** They're standalone HTTP/1.1 servers in any language.
 - **Wire is opaque.** Router↔handler hop wraps Claude payload as `{"payload": "<json-str>"}` and unwraps `{"envelope": "<json-str>"|null}`. Don't add Claude-schema typing on this hop — the whole point is decoupling from Claude's evolving envelope schema.
 - **No SDK.** No Python helper classes for writing handlers — they would couple handlers to this package's lifecycle.

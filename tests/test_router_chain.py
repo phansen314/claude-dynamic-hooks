@@ -6,7 +6,7 @@ import json
 import threading
 
 from claude_dynamic_hooks._server.router_chain import run as chain_run
-from claude_dynamic_hooks.config import ChainOverride, HandlerEntry
+from claude_dynamic_hooks.config import HandlerEntry
 from claude_dynamic_hooks.events import EventType
 
 
@@ -68,11 +68,11 @@ def _stop(server: _StubServer, t: threading.Thread) -> None:
 
 
 def _handler(name: str, base_url: str, *, terminal: bool = False) -> HandlerEntry:
-    override = ChainOverride(terminal=terminal) if terminal else ChainOverride()
     return HandlerEntry(
         name=name,
         url=base_url,
-        events={EventType.PRE_TOOL_USE: override},
+        events=frozenset({EventType.PRE_TOOL_USE}),
+        terminal=terminal,
     )
 
 
@@ -196,7 +196,7 @@ def test_unreachable_handler_skipped():
     s.close()
     handler = HandlerEntry(
         name="dead", url=f"http://127.0.0.1:{port}",
-        events={EventType.PRE_TOOL_USE: ChainOverride()},
+        events=frozenset({EventType.PRE_TOOL_USE}),
     )
     result = chain_run(
         event=EventType.PRE_TOOL_USE,

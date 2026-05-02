@@ -8,9 +8,9 @@ info:
     A CDHP handler is a standalone HTTP/1.1 server. It implements
     `POST /hooks/<event>` for each event it answers for and `GET /health`
     for liveness. Events are declared statically in the router's config
-    (`[handler.events.<event>]`); the router does not probe handlers to
-    discover events. `GET /health` is used by `cdh list-handlers` to
-    report alive/down status.
+    (`events = [...]` on the `[[handler]]` block); the router does not
+    probe handlers to discover events. `GET /health` is used by
+    `cdh list-handlers` to report alive/down status.
 
     Claude payloads are passed as opaque JSON strings in `payload`, and handler
     responses are passed as opaque JSON strings in `envelope` (or `null` for
@@ -36,9 +36,10 @@ paths:
       summary: Liveness + capability probe
       description: |
         Required endpoint. The router does not require `/health` to discover
-        events — declaration is static under `[handler.events.<event>]` in
-        router config — but `cdh list-handlers` calls `/health` to report
-        alive/down status, and operators rely on it for ad-hoc curl debugging.
+        events — declaration is static via `events = [...]` on each
+        `[[handler]]` in router config — but `cdh list-handlers` calls
+        `/health` to report alive/down status, and operators rely on it for
+        ad-hoc curl debugging.
       responses:
         "200":
           description: Handler is alive; advertises declared events.

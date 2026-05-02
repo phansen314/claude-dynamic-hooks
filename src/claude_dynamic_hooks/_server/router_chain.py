@@ -36,8 +36,8 @@ def run(
         event:             The hook event being dispatched.
         params:            The Claude hook payload (serialized as a string for transport).
         handlers:          Pre-filtered handlers that declare *event* in their config.
-        default_timeout_s: Per-call timeout when handler config doesn't override.
-        default_max_bytes: Wire cap when handler config doesn't override.
+        default_timeout_s: Per-call timeout from `[daemon].request_timeout_s`.
+        default_max_bytes: Wire cap from `[daemon].wire_max_bytes`.
 
     Returns the last non-null result, or None if every handler abstained.
     """
@@ -45,18 +45,12 @@ def run(
     wire_request = {"payload": json.dumps(params)}
 
     for h in handlers:
-        override = h.events.get(event)
-        timeout_s = (
-            override.timeout_s if override and override.timeout_s is not None
-            else default_timeout_s
-        )
-        max_bytes = (
-            override.max_bytes if override and override.max_bytes is not None
-            else default_max_bytes
-        )
-
         url = f"{h.url}/hooks/{event.value}"
-        raw = http_client.post(url, wire_request, timeout_s=timeout_s, max_response_bytes=max_bytes)
+        raw = http_client.post(
+            url, wire_request,
+            timeout_s=default_timeout_s,
+            max_response_bytes=default_max_bytes,
+        )
         if raw is None:
             _log_step(event, h.name, "error/unreachable")
             continue
@@ -69,10 +63,9 @@ def run(
             _log_step(event, h.name, "malformed envelope")
             continue
 
-        terminal = bool(override and override.terminal)
         result = envelope
-        _log_step(event, h.name, f"envelope{' [terminal]' if terminal else ''}")
-        if terminal:
+        _log_step(event, h.name, f"envelope{' [terminal]' if h.terminal else ''}")
+        if h.terminal:
             return result
 
     return result

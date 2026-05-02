@@ -125,50 +125,54 @@ def test_hook_defaults_passthrough_works_for_new_catalog_events(tmp_path: Path, 
     assert cfg.defaults.get(EventType.WORKTREE_CREATE) is None
 
 
-def test_handler_override_timeout_out_of_range_raises(tmp_path: Path, monkeypatch):
+def test_handler_events_array_form(tmp_path: Path, monkeypatch):
+    """`events = [...]` parses; per-handler `terminal` is read."""
     monkeypatch.setenv("CDH_CONFIG_DIR", str(tmp_path))
     _write(tmp_path / "config.toml", dedent("""
         [[handler]]
         name = "h"
         url = "http://127.0.0.1:9001"
-
-        [handler.events.preToolUse]
-        timeout_s = 0.0
-    """))
-    with pytest.raises(ValueError, match=r"\[\[handler\]\]\[0\]\.events\.preToolUse\.timeout_s"):
-        config_mod.load()
-
-
-def test_handler_override_max_bytes_out_of_range_raises(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("CDH_CONFIG_DIR", str(tmp_path))
-    _write(tmp_path / "config.toml", dedent("""
-        [[handler]]
-        name = "h"
-        url = "http://127.0.0.1:9001"
-
-        [handler.events.preToolUse]
-        max_bytes = 1
-    """))
-    with pytest.raises(ValueError, match=r"\[\[handler\]\]\[0\]\.events\.preToolUse\.max_bytes"):
-        config_mod.load()
-
-
-def test_handler_events_accept_new_catalog_events(tmp_path: Path, monkeypatch):
-    """[[handler.events.<event>]] parses for newly-catalogued events."""
-    monkeypatch.setenv("CDH_CONFIG_DIR", str(tmp_path))
-    _write(tmp_path / "config.toml", dedent("""
-        [[handler]]
-        name = "h"
-        url = "http://127.0.0.1:9001"
-
-        [handler.events.sessionEnd]
+        events = ["sessionEnd", "permissionRequest"]
         terminal = true
-
-        [handler.events.permissionRequest]
-        timeout_s = 1.0
     """))
     cfg = config_mod.load()
     h = cfg.handlers[0]
     assert EventType.SESSION_END in h.events
-    assert h.events[EventType.SESSION_END].terminal is True
-    assert h.events[EventType.PERMISSION_REQUEST].timeout_s == 1.0
+    assert EventType.PERMISSION_REQUEST in h.events
+    assert h.terminal is True
+
+
+def test_handler_terminal_defaults_false(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("CDH_CONFIG_DIR", str(tmp_path))
+    _write(tmp_path / "config.toml", dedent("""
+        [[handler]]
+        name = "h"
+        url = "http://127.0.0.1:9001"
+        events = ["preToolUse"]
+    """))
+    cfg = config_mod.load()
+    assert cfg.handlers[0].terminal is False
+
+
+def test_handler_events_must_be_array(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("CDH_CONFIG_DIR", str(tmp_path))
+    _write(tmp_path / "config.toml", dedent("""
+        [[handler]]
+        name = "h"
+        url = "http://127.0.0.1:9001"
+        events = "preToolUse"
+    """))
+    with pytest.raises(ValueError, match="must be an array"):
+        config_mod.load()
+
+
+def test_handler_events_reject_unknown(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("CDH_CONFIG_DIR", str(tmp_path))
+    _write(tmp_path / "config.toml", dedent("""
+        [[handler]]
+        name = "h"
+        url = "http://127.0.0.1:9001"
+        events = ["bogusEvent"]
+    """))
+    with pytest.raises(ValueError, match="unknown event"):
+        config_mod.load()
