@@ -68,7 +68,8 @@ Edits to `config.toml` are applied live — the daemon watches the file and atom
 ```bash
 cdh start
 cdh list-handlers
-#   read_once — http://127.0.0.1:9001 — alive — events: preToolUse
+#   read_once	http://127.0.0.1:9001	alive	preToolUse
+# (tab-separated: name, url, health, comma-joined events)
 ```
 
 **5. Wire Claude Code at `~/.claude/settings.json`**

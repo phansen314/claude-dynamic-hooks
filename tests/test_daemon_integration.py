@@ -1,6 +1,7 @@
 """Integration: spawn router daemon, drive HTTP, verify probe + chain."""
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import signal
@@ -27,6 +28,8 @@ import pytest
 #   text_plain      — return 200 + text/plain body
 #   missing_envelope — return 200 + JSON missing the `envelope` key
 #   record          — write request count to CDH_TEST_RECORD_FILE then echo
+#   echo_payload    — return 200 + {"envelope": "<received payload string>"} so the
+#                     router unwraps it and the test sees the inbound payload dict
 _HANDLER_TEMPLATE = '''
 import http.server, json, os, signal, sys, threading, time
 
@@ -91,6 +94,8 @@ class H(http.server.BaseHTTPRequestHandler):
             payload_str = body.get("payload") if isinstance(body, dict) else None
             if not isinstance(payload_str, str):
                 self._send(400, {"error": "missing payload"}); return
+            if MODE == "echo_payload":
+                self._send(200, {"envelope": payload_str}); return
             envelope = json.dumps(RESPONSE) if RESPONSE is not None else None
             self._send(200, {"envelope": envelope})
             return
@@ -779,6 +784,11 @@ def test_config_broken_toml_keeps_prior_chain(tmp_path):
             _, body = _post(f"{base}/hooks/preToolUse", {})
             assert body["hookSpecificOutput"]["permissionDecision"] == "deny"
 
+            # /health initially reports a successful reload.
+            _, health = _get(f"{base}/health")
+            assert health["config"]["last_reload_ok"] is True
+            assert health["config"]["last_reload_error"] is None
+
             # Save broken TOML.
             (user_dir / "config.toml").write_text("this is = not valid = toml [[[\n")
             _await_log(tmp_path, "config reload failed")
@@ -786,6 +796,11 @@ def test_config_broken_toml_keeps_prior_chain(tmp_path):
             # Prior chain still serves.
             _, body = _post(f"{base}/hooks/preToolUse", {})
             assert body["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+            # /health now surfaces the failure.
+            _, health = _get(f"{base}/health")
+            assert health["config"]["last_reload_ok"] is False
+            assert health["config"]["last_reload_error"]
 
             # Fix the TOML — recovery.
             _write(user_dir / "config.toml", dedent(f"""
@@ -800,6 +815,49 @@ def test_config_broken_toml_keeps_prior_chain(tmp_path):
             _await_log(tmp_path, "config reload: 1 handler(s) loaded")
             _, body = _post(f"{base}/hooks/preToolUse", {})
             assert body["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+            # /health flips back to ok on recovery.
+            _, health = _get(f"{base}/health")
+            assert health["config"]["last_reload_ok"] is True
+            assert health["config"]["last_reload_error"] is None
+        finally:
+            _shutdown(proc)
+    finally:
+        _stop_handler(h_proc)
+
+
+def test_chunked_request_body_reaches_handler(tmp_path):
+    """Chunked-encoding POST has no Content-Length. Router must still parse the
+    body and forward it to the handler — not silently substitute {} (regression
+    guard for the `if request.content_length:` gate that was removed in B1)."""
+    port = _free_port()
+    h_proc, h_url, _ = _spawn_handler(tmp_path, "echo_p", mode="echo_payload")
+    try:
+        user_dir = _make_user_config(tmp_path, f"""
+            [daemon]
+            port = {port}
+
+            [[handler]]
+            name = "echo_p"
+            url = "{h_url}"
+            events = ["preToolUse"]
+        """)
+        proc = _spawn_router(tmp_path, user_config_dir=user_dir, port=port)
+        try:
+            inbound = {"session_id": "abc", "tool_name": "X"}
+            payload = json.dumps(inbound).encode()
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=3.0)
+            conn.putrequest("POST", "/hooks/preToolUse")
+            conn.putheader("Content-Type", "application/json")
+            conn.putheader("Transfer-Encoding", "chunked")
+            conn.endheaders()
+            conn.send(f"{len(payload):x}\r\n".encode() + payload + b"\r\n0\r\n\r\n")
+            resp = conn.getresponse()
+            assert resp.status == 200
+            body = json.loads(resp.read())
+            # echo_payload handler returns {"envelope": "<payload-string>"}.
+            # Router unwraps the envelope; we should see the inbound dict here.
+            assert body == inbound
         finally:
             _shutdown(proc)
     finally:

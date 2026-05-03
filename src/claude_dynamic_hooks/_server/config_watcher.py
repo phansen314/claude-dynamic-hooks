@@ -16,8 +16,8 @@ stay alive across malformed-TOML edits so the next save can recover.
 """
 from __future__ import annotations
 
+import logging
 import os
-import sys
 import threading
 from collections.abc import Callable
 from pathlib import Path
@@ -27,11 +27,11 @@ from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
 _DEBOUNCE_S = 0.05
+log = logging.getLogger("cdh.watcher")
 
 
 def _log(msg: str) -> None:
-    sys.stderr.write(f"config_watcher {msg}\n")
-    sys.stderr.flush()
+    log.warning("%s", msg)
 
 
 class _Handler(FileSystemEventHandler):

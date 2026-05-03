@@ -3,9 +3,11 @@
 Tracks (session_id, file_path) → mtime_ns per session. On re-read of an
 unchanged file within TTL: advises (warn mode) or blocks (deny mode).
 
-You run this process yourself (manual / systemd / container). The cdh
-router probes /health to discover declared events and POSTs Claude hook
-payloads to /hooks/<event>.
+You run this process yourself (manual / systemd / container). You declare
+which events the router POSTs to /hooks/<event> in ~/.config/cdh/config.toml
+via `events = [...]` on the [[handler]] block — the router does not probe
+/health to discover events. /health is used by `cdh list-handlers` for
+liveness only.
 
 CDHP wire contract (see docs/openapi.yaml) implemented:
     GET  /health              → 200 + {name, protocol_version, events, uptime_s}
@@ -24,6 +26,7 @@ Env (handler-specific, optional):
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -172,16 +175,35 @@ def main() -> None:
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
     server = make_server(host, int(port_s), _build_app(settings), threaded=True)
 
-    def _shutdown(*_):
-        threading.Thread(target=server.shutdown, daemon=True).start()
+    shutdown_r, shutdown_w = os.pipe()
 
-    signal.signal(signal.SIGTERM, _shutdown)
-    signal.signal(signal.SIGINT, _shutdown)
+    def _on_signal(*_):
+        # os.write is async-signal-safe; thread/lock allocation is not.
+        # Keep bare try/except — contextlib.suppress allocates a manager
+        # object, which we want to avoid in signal context.
+        try:  # noqa: SIM105
+            os.write(shutdown_w, b"x")
+        except OSError:
+            pass
+
+    def _wait_and_shutdown():
+        try:
+            os.read(shutdown_r, 1)
+        except OSError:
+            return
+        server.shutdown()
+
+    threading.Thread(target=_wait_and_shutdown, daemon=True).start()
+    signal.signal(signal.SIGTERM, _on_signal)
+    signal.signal(signal.SIGINT, _on_signal)
 
     try:
         server.serve_forever()
     finally:
         server.server_close()
+        for fd in (shutdown_r, shutdown_w):
+            with contextlib.suppress(OSError):
+                os.close(fd)
 
 
 if __name__ == "__main__":

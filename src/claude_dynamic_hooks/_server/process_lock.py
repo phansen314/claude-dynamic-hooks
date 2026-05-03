@@ -48,12 +48,16 @@ def acquire(pid_file: Path) -> int:
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
-        try:
-            existing_pid = int(os.read(fd, _PID_BUF_BYTES).strip())
-        except Exception:
-            existing_pid = "?"
         os.close(fd)
-        print(f"cdh daemon already running (pid {existing_pid})", file=sys.stderr)
+        existing = holder_pid(pid_file)
+        if existing == LOCKED_UNKNOWN_PID:
+            msg = (
+                f"cdh daemon already running (pid unknown — "
+                f"{pid_file} corrupted; remove and retry)"
+            )
+        else:
+            msg = f"cdh daemon already running (pid {existing})"
+        print(msg, file=sys.stderr)
         sys.exit(1)
     os.ftruncate(fd, 0)
     os.lseek(fd, 0, os.SEEK_SET)

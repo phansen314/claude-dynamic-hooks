@@ -95,7 +95,36 @@ def _cmd_status() -> None:
         print("stopped")
         sys.exit(1)
     print(f"running ({_format_pid(pid)})")
+    _print_reload_status()
     sys.exit(0)
+
+
+def _print_reload_status() -> None:
+    """Probe /health for last config reload status; print if reload failed.
+
+    Silent on success and on probe failure (status command must not depend
+    on knowing the daemon's port — best-effort only).
+    """
+    try:
+        cfg = config_mod.load()
+    except Exception:
+        return
+    try:
+        r = requests.get(
+            f"http://127.0.0.1:{cfg.daemon.port}/health",
+            timeout=_HEALTH_PROBE_TIMEOUT_S,
+        )
+    except requests.RequestException:
+        return
+    if not r.ok:
+        return
+    try:
+        config_block = r.json().get("config") or {}
+    except ValueError:
+        return
+    if config_block.get("last_reload_ok") is False:
+        err = config_block.get("last_reload_error") or "(no detail)"
+        print(f"CONFIG RELOAD FAILED: {err}", file=sys.stderr)
 
 
 def _probe_health(url: str, timeout: float = _HEALTH_PROBE_TIMEOUT_S) -> str:

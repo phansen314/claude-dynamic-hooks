@@ -10,14 +10,33 @@ can distinguish e.g. a 500 from a timeout.
 from __future__ import annotations
 
 import json
-import sys
+import logging
 
 import requests
 
+log = logging.getLogger("cdh.client")
+_ERROR_BODY_PREVIEW_BYTES = 200
+
 
 def _log(url: str, cause: str) -> None:
-    sys.stderr.write(f"client {url}: {cause}\n")
-    sys.stderr.flush()
+    log.warning("%s: %s", url, cause)
+
+
+def _error_body_preview(resp: requests.Response) -> str:
+    """Read up to N bytes of an error response body for inclusion in the log line."""
+    snippet = b""
+    try:
+        for chunk in resp.iter_content(chunk_size=512):
+            snippet += chunk
+            if len(snippet) >= _ERROR_BODY_PREVIEW_BYTES:
+                break
+    except requests.RequestException:
+        pass
+    return (
+        snippet[:_ERROR_BODY_PREVIEW_BYTES]
+        .decode("utf-8", errors="replace")
+        .replace("\n", " ")
+    )
 
 
 def post(url: str, body: dict, *, timeout_s: float, max_response_bytes: int) -> dict | None:
@@ -34,7 +53,8 @@ def post(url: str, body: dict, *, timeout_s: float, max_response_bytes: int) -> 
         return None
     try:
         if not resp.ok:
-            _log(url, f"http {resp.status_code}")
+            preview = _error_body_preview(resp)
+            _log(url, f"http {resp.status_code}: {preview}")
             return None
         cl = resp.headers.get("Content-Length")
         if cl is not None and cl.isdigit() and int(cl) > max_response_bytes:

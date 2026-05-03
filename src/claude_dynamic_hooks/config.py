@@ -13,6 +13,7 @@ from __future__ import annotations
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlparse
 
 from .events import EventType
 from .paths import config_dir
@@ -84,7 +85,7 @@ def load() -> Config:
     raw = _read(_user_path())
     daemon = _build_daemon(raw.get("daemon", {}) or {})
 
-    defaults: dict[EventType, dict | None] = _BUILTIN_DEFAULTS.copy()
+    defaults: dict[EventType, dict | None] = {}
     _apply_defaults(defaults, raw.get("hook_defaults", {}) or {})
 
     handlers = list(_extract_handlers(raw))
@@ -145,9 +146,13 @@ def _extract_handlers(raw: dict):
         if not isinstance(name, str) or not name:
             raise ValueError(f"[[handler]][{i}] missing 'name'")
         url = entry.get("url")
-        if not isinstance(url, str) or not url.startswith(("http://", "https://")):
+        if not isinstance(url, str):
+            raise ValueError(f"[[handler]][{i}] 'url' missing or not a string")
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
             raise ValueError(
-                f"[[handler]][{i}] 'url' must be an http(s) URL; got {url!r}"
+                f"[[handler]][{i}] 'url' must be a valid http(s) URL with host; "
+                f"got {url!r}"
             )
         events_raw = entry.get("events", []) or []
         if not isinstance(events_raw, list):
@@ -198,6 +203,3 @@ def _compile_default(event: EventType, kw) -> dict | None:
         f"[hook_defaults.{event.value}] = {kw!r} is not supported; "
         f"valid: 'passthrough' (any event), 'ask'/'allow'/'deny' (preToolUse only)"
     )
-
-
-_BUILTIN_DEFAULTS: dict[EventType, dict | None] = {}

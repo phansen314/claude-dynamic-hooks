@@ -14,13 +14,14 @@ Claude's hook payload schema. See `docs/openapi.yaml`.
 from __future__ import annotations
 
 import json
-import sys
+import logging
 
 from ..config import HandlerEntry
 from ..events import EventType
 from .transport import client as http_client
 
 _MALFORMED = object()
+log = logging.getLogger("cdh.chain")
 
 
 def run(
@@ -89,5 +90,4 @@ def _extract_envelope(raw: dict):
 
 
 def _log_step(event: EventType, name: str, outcome: str) -> None:
-    sys.stderr.write(f"chain {event.value} → {name}: {outcome}\n")
-    sys.stderr.flush()
+    log.info("%s → %s: %s", event.value, name, outcome)

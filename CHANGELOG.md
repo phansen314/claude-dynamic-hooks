@@ -4,6 +4,67 @@ All notable changes to this project will be documented in this file. Format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] — 2026-05-03
+
+### Fixed
+
+- **Chunked-encoding body loss (B1).** `POST /hooks/<event>` used
+  `if request.content_length:` to gate JSON parsing. Chunked-encoded
+  requests carry no `Content-Length`, so the body was silently discarded
+  and handlers received `{}`. Fixed by calling `request.get_json()` on
+  every request regardless of content-length presence.
+- **`process_lock.acquire()` duplicated PID read (B2).** Lock-contention
+  path re-read the PID file inline instead of reusing the existing
+  `holder_pid()` helper. Now calls `holder_pid()` directly and uses
+  `LOCKED_UNKNOWN_PID` to emit a clearer error message when the PID file
+  is corrupted.
+
+### Added
+
+- **Config reload status on `/health` (D1).** `/health` response now
+  includes a `"config"` block with `last_reload_at`, `last_reload_ok`,
+  and `last_reload_error`. On a failed reload the prior handler chain
+  keeps serving, and the snapshot is updated with `last_reload_ok: false`
+  so operators can detect the failure without tailing logs.
+- **`cdh status` surfaces reload failures (D1).** If the daemon is
+  running but the last config reload failed, `cdh status` prints
+  `CONFIG RELOAD FAILED: <detail>` to stderr (best-effort probe via
+  `/health`; silent if the probe fails).
+- **Router→handler error-body preview in logs (D7).** When a handler
+  returns a non-2xx response, the client now streams up to 200 bytes of
+  the response body and includes it in the warning log line, making
+  handler-side errors diagnosable without extra curl runs.
+
+### Changed
+
+- **Structured logging with rotation (D2).** All daemon log output
+  (access log, chain steps, config-watcher events, client warnings) now
+  goes through Python's `logging` module instead of bare
+  `sys.stderr.write`. Log format: `YYYY-MM-DD HH:MM:SS LEVEL name:
+  message`. `daemon.log` rotates at 10 MiB, keeps 3 backups.
+  `sys.excepthook` is wired to log uncaught exceptions at CRITICAL.
+- **`Snapshot.max_body_bytes` → `outbound_max_bytes` (D4).** Field
+  rename clarifies that the live-reloadable byte cap applies to the
+  router→handler hop only; the inbound Flask cap (`MAX_CONTENT_LENGTH`)
+  stays pinned at the startup value.
+- **Handler URL validation uses `urlparse` (D6).** The previous
+  `url.startswith(("http://","https://"))` check accepted bare scheme
+  strings like `http://` (no host). Replaced with `urlparse` checking
+  both scheme and `netloc`, with a clearer error message.
+- **Dead `_BUILTIN_DEFAULTS` dict removed (D5).** Empty dict was
+  assigned, immediately copied, and discarded. Initialization now uses
+  `{}` inline.
+
+### Internal
+
+- **Async-signal-safe shutdown (B3).** Signal handlers in both the
+  daemon and the `read_once` example handler previously spawned threads
+  from signal context (`threading.Thread(...).start()`), which is not
+  async-signal-safe. Both now write a byte to an `os.pipe()` from the
+  signal handler and block on the read end in a dedicated monitor thread
+  that calls `server.shutdown()`. Eliminates a theoretical deadlock on
+  lock-internal thread spawning.
+
 ## [1.1.0] — 2026-05-02
 
 ### Added
@@ -71,11 +132,12 @@ The following invariants are stable as of 1.0 and won't be reverted (see
 
 - Router does not spawn handlers — operators run them.
 - Router does not probe handlers for events — events declared statically in
-  `~/.config/cdh/config.toml` under `[handler.events.<event>]`.
+  `~/.config/cdh/config.toml` via `events = [...]` on each `[[handler]]`
+  block. `/health` is used by `cdh list-handlers` for liveness only.
 - Wire on the router↔handler hop is opaque: `{"payload": "<json-str>"}` ↔
   `{"envelope": "<json-str>"|null}`. No Claude-schema typing on this hop.
 - No SDK. Handlers are HTTP/1.1 servers in any language.
-- Minimal runtime deps: Flask + requests.
+- Minimal runtime deps: Flask + requests + watchdog.
 
 ### Added
 
