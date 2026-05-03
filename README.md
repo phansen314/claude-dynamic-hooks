@@ -15,10 +15,18 @@ Reference Python implementation of **CDHP** (Claude Dynamic Hook Protocol). Poly
 ## Install
 
 ```bash
-uv pip install -e .
+uv tool install git+https://github.com/phansen314/claude-dynamic-hooks@v1.1.0
 ```
 
-Pulls Flask + Werkzeug for the router HTTP server. Handlers in any language are unaffected — this dep lives in the router only.
+Installs the `cdh` and `cdh-daemon` commands into `~/.local/bin` (uv-managed isolated venv). Pulls Flask + Werkzeug + watchdog for the router; handlers in any language are unaffected — these deps live in the router only.
+
+Upgrade later with:
+
+```bash
+uv tool upgrade claude-dynamic-hooks
+```
+
+For a development setup (editable install, dev extras), see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Quickstart
 
@@ -81,6 +89,48 @@ cdh list-handlers
 ```
 
 Restart your Claude Code session. `read_once` now sees every PreToolUse.
+
+## Run under systemd (optional)
+
+`cdh start` works fine for ad-hoc use, but for "always running" the cleanest path is a systemd **user** unit (no root needed; per-user state).
+
+`~/.config/systemd/user/cdh.service`:
+
+```ini
+[Unit]
+Description=cdh router daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/cdh-daemon
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
+```
+
+Enable + start:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now cdh
+systemctl --user status cdh
+```
+
+Survive reboots without an active login session:
+
+```bash
+loginctl enable-linger $USER
+```
+
+Notes:
+
+- Don't run `cdh start` while the systemd unit is active — both fight for the PID lock; the second exits 1.
+- `cdh-daemon` redirects its own stderr into `~/.local/state/cdh/daemon.log` via `dup2`, so the systemd journal only shows pre-startup errors. Use `cdh logs -f` for runtime logs.
+- Hot config reload still works under systemd — edits to `~/.config/cdh/config.toml` apply live; no `systemctl restart` needed.
+- Port changes need a restart: `systemctl --user restart cdh`.
 
 ## CLI
 
